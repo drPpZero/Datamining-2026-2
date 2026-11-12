@@ -21,6 +21,8 @@ Train, Validation, Test set으로 8:1:1 비율로 분할
 """
 ratings = pd.read_csv("data/ratings.csv")
 books = pd.read_csv("data/books.csv")
+book_tags = pd.read_csv("data/book_tags.csv")
+tags = pd.read_csv("data/tags.csv")
 ratings = ratings.drop_duplicates(["user_id", "book_id"]).reset_index(drop=True)
 
 selected_books = (ratings["book_id"].value_counts().head(MAX_BOOKS).index)
@@ -81,29 +83,38 @@ def do_apriori(M, min_support=0.02, min_confidence=0.3):
     rules = rules.sort_values("interest", ascending=False).reset_index(drop=True)
     return frequent, rules
 
-#Item-based CF 
-#Cosine similarity 계산 함수
-def do_CF(M):
-    similarity = cosine_similarity(M.T)
+#user-based & item-based CF
+#mode 0 = user, 1 = item
+def do_CF(M, mode=0):
+    if mode == 1 :
+        M = M.T
+    similarity = cosine_similarity(M)
     np.fill_diagonal(similarity, 0)
     return similarity
 
-#Cosine similarity 기반 도서 추천
-def recommend_CF(user_id, M, M_seen, similarity, top_k=5):
+#k-means clustering
+#mode 0 = user, 1 = item
+def do_Clustering(M, k, mode=0):
+    if mode == 1 :
+        M = M.T
+    book_vectors = normalize(M.tocsr(), norm="l2", axis=1)
+    model = KMeans(n_clusters=k, random_state=seed, n_init=10)
+    labels = model.fit_predict(book_vectors)
+    return labels
+
+# Cosine similarity 기반 도서 추천
+# mode 0 = user, 1 = item
+def recommend_CF(user_id, M, M_seen, similarity, top_k=5, mode=0):
     u = user_index[user_id]
-    scores = np.asarray(M[u] @ similarity).ravel()
+    if mode == 0:
+        scores = np.asarray(similarity[u] @ M).ravel()
+    else:
+        scores = np.asarray(M[u] @ similarity).ravel()
     seen = M_seen[u].indices
     scores[seen] = -np.inf
     ranked = np.argsort(-scores)
     ranked = [i for i in ranked if scores[i] > 0][:top_k]
     return [int(book_ids[i]) for i in ranked]
-
-#k-means clustering
-def do_Clustering(M, k):
-    book_vectors = normalize(M.T.tocsr(), norm="l2", axis=1)
-    model = KMeans(n_clusters=k, random_state=seed, n_init=10)
-    labels = model.fit_predict(book_vectors)
-    return labels
 
 #k-means 기반 item-based CF
 def do_Cluster_CF(similarity, labels):
@@ -111,29 +122,64 @@ def do_Cluster_CF(similarity, labels):
     cluster_similarity = similarity * same_cluster
     return cluster_similarity
 
-matrix = make_matrix(train, TF=True)
-frequent, rules = do_apriori(matrix)
-
-#print("빈발 항목집합 개수:", len(frequent))
-#print("연관 규칙 개수:", len(rules))
-#print(rules.head(10))
+def find_genre(labels):
+    book_clusters = pd.DataFrame({"book_id": book_ids, "cluster": labels})
+    tag_data = (book_clusters
+        .merge(books[["book_id", "goodreads_book_id"]], on="book_id")
+        .merge(book_tags, on="goodreads_book_id")
+        .merge(tags, on="tag_id"))
+    tag_data = tag_data[["book_id", "cluster", "tag_name"]].drop_duplicates()
+    cluster_sizes = book_clusters["cluster"].value_counts().sort_index()
+    tag_counts = pd.crosstab(tag_data["cluster"], tag_data["tag_name"])
+    cluster_ratio = tag_counts.div(cluster_sizes, axis=0)
+    overall_ratio = (tag_data.groupby("tag_name")["book_id"].nunique() / n_books)
+    tag_scores = cluster_ratio.div(overall_ratio, axis=1)
+    for cluster in tag_scores.index:
+        tag_scores.loc[cluster, tag_counts.loc[cluster] < 3] = 0
+    return tag_scores
 
 
 M_liked = make_matrix(train, TF=True)
 M_seen = make_matrix(train, TF=False)
-similarity = do_CF(M_liked)
-user = user_ids[10]
-recom = recommend_CF(user, M_liked, M_seen, similarity)
+
+frequent, rules = do_apriori(M_liked)
+print("\n빈발 항목집합 개수:", len(frequent))
+print("연관 규칙 개수:", len(rules))
+print(rules.head(5))
+
+similarity_user = do_CF(M_liked, mode=0)
+similarity_item = do_CF(M_liked, mode=1)
+labels_user = do_Clustering(M_liked, k=10, mode=0)
+labels_item = do_Clustering(M_liked, k=10, mode=1)
+print("\n클러스터별 인원:")
+print(pd.Series(labels_user).value_counts().sort_index())
+print("\n클러스터별 도서 수:")
+print(pd.Series(labels_item).value_counts().sort_index())
+
+cluster_similarity_user = do_Cluster_CF(similarity_user, labels_user)
+cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
+tag_scores = find_genre(labels_item)
+user = int(user_ids[10])
 titles = books.set_index("book_id")["title"].to_dict()
 
-print("\n추천 도서:")
-for book_id in recom:
-    print(book_id, titles.get(book_id))
+recom_user = recommend_CF(user, M_liked, M_seen, similarity_user, top_k=10, mode=0)
+recom_item = recommend_CF(user, M_liked, M_seen, similarity_item, top_k=10, mode=1)
+recom_cluster_user = recommend_CF(user, M_liked, M_seen, cluster_similarity_user, top_k=10, mode=0)
+recom_cluster_item = recommend_CF( user, M_liked, M_seen,cluster_similarity_item, top_k=10, mode=1)
 
-labels = do_Clustering(M_liked, k=10)
-cluster_similarity = do_Cluster_CF(similarity, labels)
-recom_cluster = recommend_CF(user, M_liked, M_seen, cluster_similarity, top_k=5)
+results = {
+    "User-based CF": recom_user,
+    "Item-based CF": recom_item,
+    "K-means + User-based CF": recom_cluster_user,
+    "K-means + Item-based CF": recom_cluster_item
+}
 
-print("\nK-means + CF 추천 도서:")
-for book_id in recom_cluster:
-    print(book_id, titles.get(book_id))
+for i, recommendations in results.items():
+    print(f"\n{i} 추천 도서:")
+    for book_id in recommendations:
+        print(book_id, titles.get(book_id))
+
+print("\n특징 태그:")
+for cluster in tag_scores.index:
+    print(f"\nCluster {cluster}")
+    print(tag_scores.loc[cluster].nlargest(3))
