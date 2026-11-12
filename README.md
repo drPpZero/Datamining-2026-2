@@ -29,8 +29,11 @@ Goodbooks-10k
 ## 실행 방법
 
 라이브러리를 설치하기 위해, 아래 명령어를 터미널에 입력합니다.
+```
 pip install numpy pandas scipy scikit-learn mlxtend matplotlib
-
+```
 이후 프로젝트 루트 디렉토리에서,
+```
 python main.py
+```
 를 입력해 실행할 수 있습니다.
