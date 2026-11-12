@@ -22,6 +22,8 @@ ratings = pd.read_csv("data/ratings.csv")
 books = pd.read_csv("data/books.csv")
 book_tags = pd.read_csv("data/book_tags.csv")
 tags = pd.read_csv("data/tags.csv")
+to_read = pd.read_csv("data/to_read.csv")
+
 ratings = ratings.drop_duplicates(["user_id", "book_id"]).reset_index(drop=True)
 
 selected_books = (ratings["book_id"].value_counts().head(MAX_BOOKS).index)
@@ -37,6 +39,7 @@ n_users = len(user_ids)
 n_books = len(book_ids)
 user_index = {user_id: i for i, user_id in enumerate(user_ids)}
 book_index = {book_id: i for i, book_id in enumerate(book_ids)}
+to_read = to_read[to_read["user_id"].isin(user_ids) & to_read["book_id"].isin(book_ids)].groupby("user_id")["book_id"].agg(set).to_dict()
 
 set_val = []
 set_test = []
@@ -170,6 +173,8 @@ def evaluate(func, data, top_k=10):
     likes = (data[data["rating"] >= 4].groupby("user_id")["book_id"].agg(set))
     recalls = []
     ndcgs = []
+    to_read_hits = []
+
     for user_id, relevant in likes.items():
         recom = func(user_id)[:top_k]
         # Recall@K
@@ -186,10 +191,15 @@ def evaluate(func, data, top_k=10):
         ndcg = dcg / idcg
         recalls.append(recall)
         ndcgs.append(ndcg)
+        if user_id in to_read:
+            hit = int(bool(set(recom) & to_read[user_id]))
+            to_read_hits.append(hit)
     return {
         "Recall@10": np.mean(recalls),
         "NDCG@10": np.mean(ndcgs),
-        "Users": len(likes)
+        "ToRead_Hit@10": np.mean(to_read_hits) if to_read_hits else np.nan,
+        "Users": len(likes),
+        "ToRead_Users": len(to_read_hits)
     }
 
 
