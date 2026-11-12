@@ -7,8 +7,8 @@ from mlxtend.frequent_patterns import apriori, association_rules
 
 seed = 67
 rng = np.random.default_rng(seed)
-MAX_BOOKS = 5000 # MAX_BOOKS < 10001
-MAX_USERS = 30000 # MAX_USERS < 53425
+MAX_BOOKS = 1000 # MAX_BOOKS < 10001
+MAX_USERS = 5000 # MAX_USERS < 53425
 
 """
 데이터 전처리
@@ -53,7 +53,7 @@ print("Validation:", len(val))
 print("Test:", len(test))
 
 # 희소행렬 함수
-# param TF는 4 이상 평점을 1, 3 이하 평점을 0으로 치환
+# param TF=False-> 이미 본 책 마킹, True-> 선호 책 마킹
 def make_matrix(data, TF=False):
     if TF:
         data = data[data["rating"] >= 4]
@@ -66,7 +66,7 @@ def make_matrix(data, TF=False):
 #Apriori 함수
 def do_apriori(M, min_support=0.02, min_confidence=0.3):
     baskets = pd.DataFrame.sparse.from_spmatrix(M, columns=book_ids.astype(str)).astype(pd.SparseDtype(bool, False))
-    frequent = apriori(baskets, min_support=min_support, use_colnames=True, max_len=2, low_memory=True)
+    frequent = apriori(baskets, min_support=min_support, use_colnames=True, low_memory=True)
 
     if frequent.empty or not frequent["itemsets"].apply(len).ge(2).any():
         return frequent, pd.DataFrame()
@@ -76,6 +76,11 @@ def do_apriori(M, min_support=0.02, min_confidence=0.3):
     rules = rules[["antecedents", "consequents", "support", "confidence", "interest"]]
     rules = rules.sort_values("interest", ascending=False).reset_index(drop=True)
     return frequent, rules
+
+def do_CF():
+    return
+def do_Clustering():
+    return
 
 matrix = make_matrix(train, TF=True)
 frequent, rules = do_apriori(matrix)
