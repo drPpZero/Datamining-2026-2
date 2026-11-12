@@ -2,17 +2,16 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
 from scipy.sparse import csr_matrix
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
-seed = 67
+seed = 6767
 rng = np.random.default_rng(seed)
-MAX_BOOKS = 1000 # MAX_BOOKS < 10001
-MAX_USERS = 5000 # MAX_USERS < 53425
+MAX_BOOKS = 2000 # MAX_BOOKS < 10001
+MAX_USERS = 10000 # MAX_USERS < 53425
 
 """
 데이터 전처리
@@ -85,19 +84,27 @@ def do_apriori(M, min_support=0.02, min_confidence=0.3):
     rules = rules.sort_values("interest", ascending=False).reset_index(drop=True)
     return frequent, rules
 
+def save_rules(rules):
+    rule_index = {}
+    for ant, con, confidence in rules[["antecedents", "consequents", "confidence"]].itertuples(index=False, name=None):
+        book = next(iter(ant))
+        if book not in rule_index:
+            rule_index[book] = []
+        rule_index[book].append((ant, con, confidence))
+    return rule_index
+
 #Apriori 기반 추천 시스템
-def recom_Apriori(user_id, M, M_seen, rules, top_k=10):
+def recom_Apriori(user_id, M, M_seen, rule_index, top_k=10):
     u = user_index[user_id]
     liked = set(book_ids[M[u].indices].astype(str))
     seen = set(book_ids[M_seen[u].indices].astype(str))
     scores = {}
-    for _, rule in rules.iterrows():
-        ant = rule["antecedents"]
-        con = rule["consequents"]
-        if ant.issubset(liked):
-            for book in con:
-                if book not in seen:
-                    scores[book] = max(scores.get(book, 0), rule["confidence"])
+    for book in liked:
+        for ant, con, confidence in rule_index.get(book, []):
+            if ant.issubset(liked):
+                for target in con:
+                    if target not in seen:
+                        scores[target] = max(scores.get(target, 0),confidence)
 
     ranked = sorted(scores, key=scores.get, reverse=True)
     return [int(book) for book in ranked[:top_k]]
@@ -157,14 +164,41 @@ def find_genre(labels):
         tag_scores.loc[cluster, tag_counts.loc[cluster] < 3] = 0
     return tag_scores
 
+#평가 함수
+#Recall@K, NDCG@K 사용
+def evaluate(func, data, top_k=10):
+    likes = (data[data["rating"] >= 4].groupby("user_id")["book_id"].agg(set))
+    recalls = []
+    ndcgs = []
+    for user_id, relevant in likes.items():
+        recom = func(user_id)[:top_k]
+        # Recall@K
+        hits = len(set(recom) & relevant)
+        recall = hits / len(relevant)
+        # NDCG@K
+        dcg = 0
+        for rank, book_id in enumerate(recom, start=1):
+            if book_id in relevant:
+                dcg += 1 / np.log2(rank + 1)
+        idcg = 0
+        for rank in range(1, min(len(relevant), top_k) + 1):
+            idcg += 1 / np.log2(rank + 1)
+        ndcg = dcg / idcg
+        recalls.append(recall)
+        ndcgs.append(ndcg)
+    return {
+        "Recall@10": np.mean(recalls),
+        "NDCG@10": np.mean(ndcgs),
+        "Users": len(likes)
+    }
+
 
 M_liked = make_matrix(train, TF=True)
 M_seen = make_matrix(train, TF=False)
 user = int(user_ids[10])
 
 frequent, rules = do_apriori(M_liked)
-recom_apriori = recom_Apriori(user, M_liked, M_seen, rules, top_k=10)
-
+rule_index = save_rules(rules)
 similarity_user = do_CF(M_liked, mode=0)
 similarity_item = do_CF(M_liked, mode=1)
 
@@ -175,37 +209,23 @@ cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
 
 tag_scores = find_genre(labels_item)
 
-print("\n빈발 항목집합 개수:", len(frequent))
-print("연관 규칙 개수:", len(rules))
-print(rules.head(5))
-print("\nApriori 추천 도서:")
-for book_id in recom_apriori:
-    print(book_id, titles.get(book_id))
-
-
-print("\n클러스터별 인원:")
-print(pd.Series(labels_user).value_counts().sort_index())
-print("\n클러스터별 도서 수:")
-print(pd.Series(labels_item).value_counts().sort_index())
-
-recom_user = recommend_CF(user, M_liked, M_seen, similarity_user, top_k=10, mode=0)
-recom_item = recommend_CF(user, M_liked, M_seen, similarity_item, top_k=10, mode=1)
-recom_cluster_user = recommend_CF(user, M_liked, M_seen, cluster_similarity_user, top_k=10, mode=0)
-recom_cluster_item = recommend_CF( user, M_liked, M_seen,cluster_similarity_item, top_k=10, mode=1)
-
-results = {
-    "User-based CF": recom_user,
-    "Item-based CF": recom_item,
-    "K-means + User-based CF": recom_cluster_user,
-    "K-means + Item-based CF": recom_cluster_item
-}
-
-for i, recommendations in results.items():
-    print(f"\n{i} 추천 도서:")
-    for book_id in recommendations:
-        print(book_id, titles.get(book_id))
-
 print("\n특징 태그:")
 for cluster in tag_scores.index:
     print(f"\nCluster {cluster}")
     print(tag_scores.loc[cluster].nlargest(3))
+
+funcs = {
+    "User-based CF": lambda u: recommend_CF(u, M_liked, M_seen, similarity_user, top_k=10, mode=0),
+    "Item-based CF": lambda u: recommend_CF(u, M_liked, M_seen, similarity_item, top_k=10, mode=1),
+    "K-means + User CF": lambda u: recommend_CF(u, M_liked, M_seen, cluster_similarity_user, top_k=10, mode=0),
+    "K-means + Item CF": lambda u: recommend_CF(u, M_liked, M_seen, cluster_similarity_item, top_k=10, mode=1),
+    "Apriori": lambda u: recom_Apriori(u, M_liked, M_seen, rule_index, top_k=10)
+}
+results = []
+for name, func in funcs.items():
+    result = evaluate(func, val, top_k=10)
+    result["Method"] = name
+    results.append(result)
+results_df = pd.DataFrame(results).set_index("Method")
+print("\nValidation 평가 결과:")
+print(results_df.round(4))
