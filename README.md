@@ -7,7 +7,7 @@ Goodbooks-10k 데이터셋을 활용해 적절한 도서를 추천하는 추천 
 Collaborative Filtering, Apriori, K-mean Clustering 알고리즘을 적용하여 추천 시스템을 구현하였습니다.
 
 ## Repository 구조
-
+```
 Datamining-2026-2/
 ├── .gitignore
 ├── README.md
@@ -18,7 +18,7 @@ Datamining-2026-2/
     ├── book_tags.csv
     └── tags.csv
 └── results/
-
+```
 ## Dataset
 
 Goodbooks-10k
