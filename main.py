@@ -1,10 +1,13 @@
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from scipy.sparse import csr_matrix
 from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import normalize
 
 seed = 67
 rng = np.random.default_rng(seed)
@@ -95,8 +98,18 @@ def recommend_CF(user_id, M, M_seen, similarity, top_k=5):
     ranked = [i for i in ranked if scores[i] > 0][:top_k]
     return [int(book_ids[i]) for i in ranked]
 
-def do_Clustering():
-    return
+#k-means clustering
+def do_Clustering(M, k):
+    book_vectors = normalize(M.T.tocsr(), norm="l2", axis=1)
+    model = KMeans(n_clusters=k, random_state=seed, n_init=10)
+    labels = model.fit_predict(book_vectors)
+    return labels
+
+#k-means 기반 item-based CF
+def do_Cluster_CF(similarity, labels):
+    same_cluster = labels[:, None] == labels[None, :]
+    cluster_similarity = similarity * same_cluster
+    return cluster_similarity
 
 matrix = make_matrix(train, TF=True)
 frequent, rules = do_apriori(matrix)
@@ -109,10 +122,18 @@ frequent, rules = do_apriori(matrix)
 M_liked = make_matrix(train, TF=True)
 M_seen = make_matrix(train, TF=False)
 similarity = do_CF(M_liked)
-user = user_ids[0]
+user = user_ids[10]
 recom = recommend_CF(user, M_liked, M_seen, similarity)
 titles = books.set_index("book_id")["title"].to_dict()
 
 print("\n추천 도서:")
 for book_id in recom:
+    print(book_id, titles.get(book_id))
+
+labels = do_Clustering(M_liked, k=10)
+cluster_similarity = do_Cluster_CF(similarity, labels)
+recom_cluster = recommend_CF(user, M_liked, M_seen, cluster_similarity, top_k=5)
+
+print("\nK-means + CF 추천 도서:")
+for book_id in recom_cluster:
     print(book_id, titles.get(book_id))
