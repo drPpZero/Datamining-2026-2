@@ -54,6 +54,8 @@ train = ratings.drop(index=set_val + set_test).reset_index(drop=True)
 val = ratings.loc[set_val].reset_index(drop=True)
 test = ratings.loc[set_test].reset_index(drop=True)
 
+titles = books.set_index("book_id")["title"].to_dict()
+
 print("\nTrain:", len(train))
 print("Validation:", len(val))
 print("Test:", len(test))
@@ -82,6 +84,23 @@ def do_apriori(M, min_support=0.02, min_confidence=0.3):
     rules = rules[["antecedents", "consequents", "support", "confidence", "interest"]]
     rules = rules.sort_values("interest", ascending=False).reset_index(drop=True)
     return frequent, rules
+
+#Apriori 기반 추천 시스템
+def recom_Apriori(user_id, M, M_seen, rules, top_k=10):
+    u = user_index[user_id]
+    liked = set(book_ids[M[u].indices].astype(str))
+    seen = set(book_ids[M_seen[u].indices].astype(str))
+    scores = {}
+    for _, rule in rules.iterrows():
+        ant = rule["antecedents"]
+        con = rule["consequents"]
+        if ant.issubset(liked):
+            for book in con:
+                if book not in seen:
+                    scores[book] = max(scores.get(book, 0), rule["confidence"])
+
+    ranked = sorted(scores, key=scores.get, reverse=True)
+    return [int(book) for book in ranked[:top_k]]
 
 #user-based & item-based CF
 #mode 0 = user, 1 = item
@@ -141,26 +160,33 @@ def find_genre(labels):
 
 M_liked = make_matrix(train, TF=True)
 M_seen = make_matrix(train, TF=False)
+user = int(user_ids[10])
 
 frequent, rules = do_apriori(M_liked)
-print("\n빈발 항목집합 개수:", len(frequent))
-print("연관 규칙 개수:", len(rules))
-print(rules.head(5))
+recom_apriori = recom_Apriori(user, M_liked, M_seen, rules, top_k=10)
 
 similarity_user = do_CF(M_liked, mode=0)
 similarity_item = do_CF(M_liked, mode=1)
+
 labels_user = do_Clustering(M_liked, k=10, mode=0)
 labels_item = do_Clustering(M_liked, k=10, mode=1)
+cluster_similarity_user = do_Cluster_CF(similarity_user, labels_user)
+cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
+
+tag_scores = find_genre(labels_item)
+
+print("\n빈발 항목집합 개수:", len(frequent))
+print("연관 규칙 개수:", len(rules))
+print(rules.head(5))
+print("\nApriori 추천 도서:")
+for book_id in recom_apriori:
+    print(book_id, titles.get(book_id))
+
+
 print("\n클러스터별 인원:")
 print(pd.Series(labels_user).value_counts().sort_index())
 print("\n클러스터별 도서 수:")
 print(pd.Series(labels_item).value_counts().sort_index())
-
-cluster_similarity_user = do_Cluster_CF(similarity_user, labels_user)
-cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
-tag_scores = find_genre(labels_item)
-user = int(user_ids[10])
-titles = books.set_index("book_id")["title"].to_dict()
 
 recom_user = recommend_CF(user, M_liked, M_seen, similarity_user, top_k=10, mode=0)
 recom_item = recommend_CF(user, M_liked, M_seen, similarity_item, top_k=10, mode=1)
