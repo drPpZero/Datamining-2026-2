@@ -4,6 +4,7 @@ import pandas as pd
 
 from scipy.sparse import csr_matrix
 from mlxtend.frequent_patterns import apriori, association_rules
+from sklearn.metrics.pairwise import cosine_similarity
 
 seed = 67
 rng = np.random.default_rng(seed)
@@ -77,14 +78,41 @@ def do_apriori(M, min_support=0.02, min_confidence=0.3):
     rules = rules.sort_values("interest", ascending=False).reset_index(drop=True)
     return frequent, rules
 
-def do_CF():
-    return
+#Item-based CF 
+#Cosine similarity 계산 함수
+def do_CF(M):
+    similarity = cosine_similarity(M.T)
+    np.fill_diagonal(similarity, 0)
+    return similarity
+
+#Cosine similarity 기반 도서 추천
+def recommend_CF(user_id, M, M_seen, similarity, top_k=5):
+    u = user_index[user_id]
+    scores = np.asarray(M[u] @ similarity).ravel()
+    seen = M_seen[u].indices
+    scores[seen] = -np.inf
+    ranked = np.argsort(-scores)
+    ranked = [i for i in ranked if scores[i] > 0][:top_k]
+    return [int(book_ids[i]) for i in ranked]
+
 def do_Clustering():
     return
 
 matrix = make_matrix(train, TF=True)
 frequent, rules = do_apriori(matrix)
 
-print("빈발 항목집합 개수:", len(frequent))
-print("연관 규칙 개수:", len(rules))
-print(rules.head(10))
+#print("빈발 항목집합 개수:", len(frequent))
+#print("연관 규칙 개수:", len(rules))
+#print(rules.head(10))
+
+
+M_liked = make_matrix(train, TF=True)
+M_seen = make_matrix(train, TF=False)
+similarity = do_CF(M_liked)
+user = user_ids[0]
+recom = recommend_CF(user, M_liked, M_seen, similarity)
+titles = books.set_index("book_id")["title"].to_dict()
+
+print("\n추천 도서:")
+for book_id in recom:
+    print(book_id, titles.get(book_id))
