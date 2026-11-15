@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,7 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 
-seed = 6767
+seed = 1234
 rng = np.random.default_rng(seed)
 MAX_BOOKS = 2000 # MAX_BOOKS < 10001
 MAX_USERS = 10000 # MAX_USERS < 53425
@@ -16,7 +15,7 @@ MAX_USERS = 10000 # MAX_USERS < 53425
 """
 데이터 전처리
 Goodbooks-10k 데이터셋을 가져와 설정한 하이퍼파라미터(MAX_BOOKS, MAX_USERS)만큼 사용
-Train, Validation, Test set으로 8:1:1 비율로 분할
+Train, Test set으로 8:2 비율로 분할
 """
 ratings = pd.read_csv("data/ratings.csv")
 books = pd.read_csv("data/books.csv")
@@ -41,25 +40,20 @@ user_index = {user_id: i for i, user_id in enumerate(user_ids)}
 book_index = {book_id: i for i, book_id in enumerate(book_ids)}
 to_read = to_read[to_read["user_id"].isin(user_ids) & to_read["book_id"].isin(book_ids)].groupby("user_id")["book_id"].agg(set).to_dict()
 
-set_val = []
 set_test = []
 
 for user_id, group in ratings.groupby("user_id"):
     indices = group.index.to_numpy().copy()
     rng.shuffle(indices)
-    n_val = max(1, round(len(indices) * 0.1))
-    n_test = max(1, round(len(indices) * 0.1))
-    set_val.extend(indices[:n_val])
-    set_test.extend(indices[n_val:n_val + n_test])
+    n_test = max(1, round(len(indices) * 0.2))
+    set_test.extend(indices[:n_test])
 
-train = ratings.drop(index=set_val + set_test).reset_index(drop=True)
-val = ratings.loc[set_val].reset_index(drop=True)
+train = ratings.drop(index=set_test).reset_index(drop=True)
 test = ratings.loc[set_test].reset_index(drop=True)
 
 titles = books.set_index("book_id")["title"].to_dict()
 
 print("\nTrain:", len(train))
-print("Validation:", len(val))
 print("Test:", len(test))
 
 # 희소행렬 함수
@@ -70,7 +64,7 @@ def make_matrix(data, TF=False):
     rows = data["user_id"].map(user_index).to_numpy()
     cols = data["book_id"].map(book_index).to_numpy()
     values = np.ones(len(data), dtype=np.float32)
-    M = csr_matrix((values, (rows, cols)),shape=(n_users, n_books))
+    M = csr_matrix((values, (rows, cols)), shape=(n_users, n_books))
     return M
 
 #Apriori 함수
@@ -107,7 +101,7 @@ def recom_Apriori(user_id, M, M_seen, rule_index, top_k=10):
             if ant.issubset(liked):
                 for target in con:
                     if target not in seen:
-                        scores[target] = max(scores.get(target, 0),confidence)
+                        scores[target] = max(scores.get(target, 0), confidence)
 
     ranked = sorted(scores, key=scores.get, reverse=True)
     return [int(book) for book in ranked[:top_k]]
@@ -115,7 +109,7 @@ def recom_Apriori(user_id, M, M_seen, rule_index, top_k=10):
 #user-based & item-based CF
 #mode 0 = user, 1 = item
 def do_CF(M, mode=0):
-    if mode == 1 :
+    if mode == 1:
         M = M.T
     similarity = cosine_similarity(M)
     np.fill_diagonal(similarity, 0)
@@ -124,7 +118,7 @@ def do_CF(M, mode=0):
 #k-means clustering
 #mode 0 = user, 1 = item
 def do_Clustering(M, k, mode=0):
-    if mode == 1 :
+    if mode == 1:
         M = M.T
     book_vectors = normalize(M.tocsr(), norm="l2", axis=1)
     model = KMeans(n_clusters=k, random_state=seed, n_init=10)
@@ -231,11 +225,13 @@ funcs = {
     "K-means + Item CF": lambda u: recommend_CF(u, M_liked, M_seen, cluster_similarity_item, top_k=10, mode=1),
     "Apriori": lambda u: recom_Apriori(u, M_liked, M_seen, rule_index, top_k=10)
 }
+
 results = []
 for name, func in funcs.items():
-    result = evaluate(func, val, top_k=10)
+    result = evaluate(func, test, top_k=10)
     result["Method"] = name
     results.append(result)
+
 results_df = pd.DataFrame(results).set_index("Method")
-print("\nValidation 평가 결과:")
+print("\nTest 평가 결과:")
 print(results_df.round(4))
