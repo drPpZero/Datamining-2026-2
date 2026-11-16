@@ -7,11 +7,18 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 import umap
+import argparse
 
-seed = 9875
+parser = argparse.ArgumentParser()
+parser.add_argument("--seed", type=int, default=9875)
+parser.add_argument("--books", type=int, default=2000)
+parser.add_argument("--users", type=int, default=10000)
+args = parser.parse_args()
+
+seed = args.seed
 rng = np.random.default_rng(seed)
-MAX_BOOKS = 1000 # MAX_BOOKS < 10001
-MAX_USERS = 5000 # MAX_USERS < 53425
+MAX_BOOKS = args.books # MAX_BOOKS < 10001
+MAX_USERS = args.users # MAX_USERS < 53425
 
 """
 데이터 전처리
