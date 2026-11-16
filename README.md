@@ -1,4 +1,4 @@
-# 도서 추천 시스템 구현
+# 도서 추천 시스템
 ### 팀원: 한지우, 신서윤, 손민서
 
 ## 프로젝트 소개
@@ -24,7 +24,6 @@ Datamining-2026-2/
 Goodbooks-10k
 출처: https://github.com/zygmuntz/goodbooks-10k
 라이선스: CC BY-SA 4.0
-데이터셋을 다운로드 후, 이 프로젝트의 data 폴더에 넣어주세요.
 
 ## 실행 방법
 데이터셋을 다운로드하여, data 폴더 내에 넣습니다.
@@ -46,3 +45,11 @@ python main.py --seed 1111 --books 2222 --users 3333
 과 같이 입력 후 실행할 수 있습니다.
 
 기본 값은 seed= , books=2000, users=10000 입니다.
+
+## 실행 결과
+실행 결과는 results 폴더에 저장됩니다.
+생성되는 파일은 총 5개로, 아래와 같습니다.
+book cluster 별 tag를 분석한 ```cluster_tags.csv```
+k-mean clustering의 k 값 별 validation set 평가를 저장한 ```k_validation.csv```
+최종 평가 결과를 저장한 ```test_results.csv```
+user 및 book clustering 결과를 UMAP으로 시각화한 ```umap_books.png``` 및 ```umap_users.png```
