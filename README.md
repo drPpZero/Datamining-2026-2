@@ -48,8 +48,13 @@ python main.py --seed 1111 --books 2222 --users 3333
 
 ## 실행 결과
 실행 결과는 results 폴더에 저장됩니다.
+
 생성되는 파일은 총 5개로, 아래와 같습니다.
+
 book cluster 별 tag를 분석한 ```cluster_tags.csv```
+ 
 k-mean clustering의 k 값 별 validation set 평가를 저장한 ```k_validation.csv```
+
 최종 평가 결과를 저장한 ```test_results.csv```
+
 user 및 book clustering 결과를 UMAP으로 시각화한 ```umap_books.png``` 및 ```umap_users.png```
