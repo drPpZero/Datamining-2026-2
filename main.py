@@ -10,13 +10,13 @@ import umap
 
 seed = 9875
 rng = np.random.default_rng(seed)
-MAX_BOOKS = 1000 # MAX_BOOKS < 10001
-MAX_USERS = 5000 # MAX_USERS < 53425
+MAX_BOOKS = 500 # MAX_BOOKS < 10001
+MAX_USERS = 2500 # MAX_USERS < 53425
 
 """
 데이터 전처리
 Goodbooks-10k 데이터셋을 가져와 설정한 하이퍼파라미터(MAX_BOOKS, MAX_USERS)만큼 사용
-Train, Test set으로 8:2 비율로 분할
+Train, Validation, Test set으로 8:1:1 비율로 분할
 """
 ratings = pd.read_csv("data/ratings.csv")
 books = pd.read_csv("data/books.csv")
@@ -41,20 +41,25 @@ user_index = {user_id: i for i, user_id in enumerate(user_ids)}
 book_index = {book_id: i for i, book_id in enumerate(book_ids)}
 to_read = to_read[to_read["user_id"].isin(user_ids) & to_read["book_id"].isin(book_ids)].groupby("user_id")["book_id"].agg(set).to_dict()
 
+set_val = []
 set_test = []
 
 for user_id, group in ratings.groupby("user_id"):
     indices = group.index.to_numpy().copy()
     rng.shuffle(indices)
-    n_test = max(1, round(len(indices) * 0.2))
-    set_test.extend(indices[:n_test])
+    n_val = max(1, round(len(indices) * 0.1))
+    n_test = max(1, round(len(indices) * 0.1))
+    set_val.extend(indices[:n_val])
+    set_test.extend(indices[n_val:n_val + n_test])
 
-train = ratings.drop(index=set_test).reset_index(drop=True)
+train = ratings.drop(index=set_val + set_test).reset_index(drop=True)
+val = ratings.loc[set_val].reset_index(drop=True)
 test = ratings.loc[set_test].reset_index(drop=True)
 
 titles = books.set_index("book_id")["title"].to_dict()
 
 print("\nTrain:", len(train))
+print("Validation:", len(val))
 print("Test:", len(test))
 
 # 희소행렬 함수
@@ -132,7 +137,7 @@ def plot_UMAP(M, labels, mode=0):
     if mode == 1:
         M = M.T
     vectors = normalize(M.tocsr(), norm="l2", axis=1)
-    model = umap.UMAP(n_components=2, metric="cosine", n_neighbors=10, min_dist=0.03, random_state=seed)
+    model = umap.UMAP(n_components=2, metric="cosine", n_neighbors=15, min_dist=0.1, random_state=seed)
     points = model.fit_transform(vectors)
     plt.figure(figsize=(9, 7))
     scatter = plt.scatter(points[:, 0], points[:, 1], c=labels, cmap="tab10", s=7, alpha=0.6)
@@ -179,6 +184,41 @@ def find_genre(labels):
         tag_scores.loc[cluster, tag_counts.loc[cluster] < 3] = 0
     return tag_scores
 
+def make_tag_table(tag_scores, labels, top_n=3):
+    rows = []
+
+    for cluster in tag_scores.index:
+        top_tags = tag_scores.loc[cluster]
+        top_tags = top_tags[top_tags > 0].sort_values(ascending=False).head(top_n)
+
+        row = {"Cluster": cluster, "Count": int(np.sum(labels == cluster))}
+        for i, (tag, score) in enumerate(top_tags.items(), start=1):
+            row[f"Tag{i}"] = tag
+            row[f"Score{i}"] = round(score, 3)
+
+        rows.append(row)
+
+    tag_table = pd.DataFrame(rows)
+    return tag_table
+
+
+def plot_tag_table(tag_table):
+    fig, ax = plt.subplots(figsize=(12, 0.6 * len(tag_table) + 1))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=tag_table.values,
+        colLabels=tag_table.columns,
+        loc="center"
+    )
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.4)
+
+    plt.tight_layout()
+    plt.show()
+    
 #평가 함수
 #Recall@K, NDCG@K 사용
 def evaluate(func, data, top_k=10):
@@ -219,22 +259,45 @@ M_liked = make_matrix(train, TF=True)
 M_seen = make_matrix(train, TF=False)
 user = int(user_ids[10])
 
-frequent, rules = do_apriori(M_liked)
-rule_index = save_rules(rules)
 similarity_user = do_CF(M_liked, mode=0)
 similarity_item = do_CF(M_liked, mode=1)
 
-labels_user = do_Clustering(M_liked, k=10, mode=0)
-labels_item = do_Clustering(M_liked, k=10, mode=1)
+k_values = [10, 20, 30, 40, 50]
+k_results = []
+
+for k in k_values:
+    labels_user = do_Clustering(M_liked, k=k, mode=0)
+    labels_item = do_Clustering(M_liked, k=k, mode=1)
+    cluster_similarity_user = do_Cluster_CF(similarity_user, labels_user)
+    cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
+
+    result_user = evaluate(lambda u: recommend_CF(u, M_liked, M_seen, cluster_similarity_user, top_k=10, mode=0), val, top_k=10)
+    result_item = evaluate(lambda u: recommend_CF(u, M_liked, M_seen, cluster_similarity_item, top_k=10, mode=1), val, top_k=10)
+
+    k_results.append([k, result_user["NDCG@10"], result_item["NDCG@10"]])
+    print(f"k={k} 완료", flush=True)
+
+k_results_df = pd.DataFrame(k_results, columns=["k", "User_NDCG@10", "Item_NDCG@10"])
+best_k_user = int(k_results_df.loc[k_results_df["User_NDCG@10"].idxmax(), "k"])
+best_k_item = int(k_results_df.loc[k_results_df["Item_NDCG@10"].idxmax(), "k"])
+
+print("\n최적 k 찾기:")
+print(k_results_df.round(4))
+print("최적 User k:", best_k_user)
+print("최적 Item k:", best_k_item)
+
+labels_user = do_Clustering(M_liked, k=best_k_user, mode=0)
+labels_item = do_Clustering(M_liked, k=best_k_item, mode=1)
 cluster_similarity_user = do_Cluster_CF(similarity_user, labels_user)
 cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
 
+print("태그 비교 중...")
 tag_scores = find_genre(labels_item)
+tag_table = make_tag_table(tag_scores, labels_item, top_n=3)
+plot_tag_table(tag_table)
 
-print("\n특징 태그:")
-for cluster in tag_scores.index:
-    print(f"\nCluster {cluster}")
-    print(tag_scores.loc[cluster].nlargest(3))
+frequent, rules = do_apriori(M_liked)
+rule_index = save_rules(rules) if not rules.empty else {}
 
 funcs = {
     "User-based CF": lambda u: recommend_CF(u, M_liked, M_seen, similarity_user, top_k=10, mode=0),
@@ -246,6 +309,7 @@ funcs = {
 
 results = []
 for name, func in funcs.items():
+    print("평가 중: " + name)
     result = evaluate(func, test, top_k=10)
     result["Method"] = name
     results.append(result)
@@ -253,5 +317,5 @@ for name, func in funcs.items():
 results_df = pd.DataFrame(results).set_index("Method")
 print("\nTest 평가 결과:")
 print(results_df.round(4))
-plot_UMAP(M_liked, labels_item, mode=1)
 plot_UMAP(M_liked, labels_user, mode=0)
+plot_UMAP(M_liked, labels_item, mode=1)
