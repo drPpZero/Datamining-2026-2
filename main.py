@@ -9,6 +9,7 @@ from sklearn.preprocessing import normalize
 import umap
 import argparse
 
+#파라미터 및 시드 설정
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=9875)
 parser.add_argument("--books", type=int, default=2000)
@@ -67,6 +68,13 @@ print("\nTrain:", len(train))
 print("Validation:", len(val))
 print("Test:", len(test))
 
+'''
+알고리즘 구현 및 태그 분석, 시각화, 평가 함수
+알고리즘은 Apriori, User/Item-based CF, k-mean Clustering
+Cluster 시각화는 UMAP 사용
+비교용 Baseline: Random, Popularity
+평가 지표는 Recall@K. NDCG@K
+'''
 # 희소행렬 함수
 # param TF=False-> 이미 본 책 마킹, True-> 선호 책 마킹
 def make_matrix(data, TF=False):
@@ -92,6 +100,7 @@ def do_apriori(M, min_support=0.03, min_confidence=0.3):
     rules = rules.sort_values("interest", ascending=False).reset_index(drop=True)
     return frequent, rules
 
+#연관규칙 재사용을 위한 저장 함수
 def save_rules(rules):
     rule_index = {}
     for ant, con, confidence in rules[["antecedents", "consequents", "confidence"]].itertuples(index=False, name=None):
@@ -170,6 +179,7 @@ def recommend_CF(user_id, M, M_seen, similarity, top_k=5, mode=0):
     ranked = [i for i in ranked if scores[i] > 0][:top_k]
     return [int(book_ids[i]) for i in ranked]
 
+#Baseline 1: 랜덤 추천
 def recommend_random(user_id, M_seen, top_k=10):
     u = user_index[user_id]
     candidates = np.setdiff1d(np.arange(n_books), M_seen[u].indices)
@@ -177,6 +187,7 @@ def recommend_random(user_id, M_seen, top_k=10):
     selected = rng_user.choice(candidates, size=min(top_k, len(candidates)), replace=False)
     return [int(book_ids[i]) for i in selected]
 
+#Baseline 2: 인기 순 추천
 def recommend_popular(user_id, M_seen, popularity_scores, top_k=10):
     u = user_index[user_id]
     scores = popularity_scores.copy()
@@ -191,6 +202,7 @@ def do_Cluster_CF(similarity, labels):
     cluster_similarity = similarity * same_cluster
     return cluster_similarity
 
+#클러스터 별 빈발 태그 탐색 함수
 def find_genre(labels):
     book_clusters = pd.DataFrame({"book_id": book_ids, "cluster": labels})
     tag_data = (book_clusters
@@ -207,6 +219,7 @@ def find_genre(labels):
         tag_scores.loc[cluster, tag_counts.loc[cluster] < 3] = 0
     return tag_scores
 
+#태그 시각화용 함수
 def make_tag_table(tag_scores, labels, top_n=3):
     rows = []
 
@@ -218,29 +231,24 @@ def make_tag_table(tag_scores, labels, top_n=3):
         for i, (tag, score) in enumerate(top_tags.items(), start=1):
             row[f"Tag{i}"] = tag
             row[f"Score{i}"] = round(score, 3)
-
         rows.append(row)
-
     tag_table = pd.DataFrame(rows)
-    return tag_table
-
-
-def plot_tag_table(tag_table):
     fig, ax = plt.subplots(figsize=(12, 0.6 * len(tag_table) + 1))
     ax.axis("off")
-
     table = ax.table(
         cellText=tag_table.values,
         colLabels=tag_table.columns,
         loc="center"
     )
-
     table.auto_set_font_size(False)
     table.set_fontsize(9)
     table.scale(1, 1.4)
 
     plt.tight_layout()
     plt.show()
+
+    return tag_table
+
     
 #평가 함수
 #Recall@K, NDCG@K 사용
@@ -271,7 +279,18 @@ def evaluate(func, data, top_k=10):
         "Users": len(likes)
     }
 
+'''
+실행 코드
+흐름은 아래와 같음
 
+validation set 이용하여 k-mean 최적 k값 도출
+->이후 train+validation set으로 재계산
+->생성된 클러스터 별 빈발 태그 분석
+->Apriori 연관규칙 생성 및 저장
+->test set 이용하여 Baseline + 추천 시스템 5가지의 책 추천 평가
+-> 결과 및 UMAP 출력
+-> 종료
+'''
 M_liked = make_matrix(train, TF=True)
 M_seen = make_matrix(train, TF=False)
 user = int(user_ids[10])
@@ -316,7 +335,6 @@ cluster_similarity_item = do_Cluster_CF(similarity_item, labels_item)
 print("태그 비교 중...")
 tag_scores = find_genre(labels_item)
 tag_table = make_tag_table(tag_scores, labels_item, top_n=3)
-plot_tag_table(tag_table)
 print("연관 규칙 생성 중...")
 frequent, rules = do_apriori(M_liked)
 rule_index = save_rules(rules) if not rules.empty else {}
