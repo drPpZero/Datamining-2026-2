@@ -8,6 +8,7 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 import umap
 import argparse
+from pathlib import Path
 
 #파라미터 및 시드 설정
 parser = argparse.ArgumentParser()
@@ -20,6 +21,9 @@ seed = args.seed
 rng = np.random.default_rng(seed)
 MAX_BOOKS = args.books # MAX_BOOKS < 10001
 MAX_USERS = args.users # MAX_USERS < 53425
+
+results_dir = Path(__file__).resolve().parent / "results"
+results_dir.mkdir(exist_ok=True)
 
 """
 데이터 전처리
@@ -153,7 +157,7 @@ def plot_UMAP(M, labels, mode=0):
     vectors = normalize(M.tocsr(), norm="l2", axis=1)
     model = umap.UMAP(n_components=2, metric="cosine", n_neighbors=15, min_dist=0.1, random_state=seed)
     points = model.fit_transform(vectors)
-    plt.figure(figsize=(9, 7))
+    fig = plt.figure(figsize=(9, 7))
     n_clusters = len(np.unique(labels))
     colors = list(plt.get_cmap("tab20").colors) + list(plt.get_cmap("tab20b").colors) + list(plt.get_cmap("tab20c").colors)
     cmap = plt.matplotlib.colors.ListedColormap(colors[:n_clusters])
@@ -163,7 +167,8 @@ def plot_UMAP(M, labels, mode=0):
     plt.ylabel("UMAP 2")
     plt.title("User Clustering" if mode == 0 else "Book Clustering")
     plt.tight_layout()
-    plt.show()
+    plt.tight_layout()
+    return fig
 
 # Cosine similarity 기반 도서 추천
 # mode 0 = user, 1 = item
@@ -233,19 +238,6 @@ def make_tag_table(tag_scores, labels, top_n=3):
             row[f"Score{i}"] = round(score, 3)
         rows.append(row)
     tag_table = pd.DataFrame(rows)
-    fig, ax = plt.subplots(figsize=(12, 0.6 * len(tag_table) + 1))
-    ax.axis("off")
-    table = ax.table(
-        cellText=tag_table.values,
-        colLabels=tag_table.columns,
-        loc="center"
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1, 1.4)
-
-    plt.tight_layout()
-    plt.show()
 
     return tag_table
 
@@ -361,5 +353,13 @@ for name, func in funcs.items():
 results_df = pd.DataFrame(results).set_index("Method")
 print("\nTest 평가 결과:")
 print(results_df.round(4))
-plot_UMAP(M_liked, labels_user, mode=0)
-plot_UMAP(M_liked, labels_item, mode=1)
+fig_user = plot_UMAP(M_liked, labels_user, mode=0)
+fig_item = plot_UMAP(M_liked, labels_item, mode=1)
+
+print("\n결과 저장 중...")
+tag_table.to_csv(results_dir / "cluster_tags.csv", index=False, encoding="utf-8-sig")
+k_results_df.to_csv(results_dir / "k_validation.csv", index=False, encoding="utf-8-sig")
+results_df.to_csv(results_dir / "test_results.csv", encoding="utf-8-sig")
+fig_user.savefig(results_dir / "umap_users.png", dpi=200, bbox_inches="tight")
+fig_item.savefig(results_dir / "umap_books.png", dpi=200, bbox_inches="tight")
+print("\n결과 저장 완료")
