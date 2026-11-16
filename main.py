@@ -6,11 +6,12 @@ from mlxtend.frequent_patterns import apriori, association_rules
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
+import umap
 
-seed = 1234
+seed = 9875
 rng = np.random.default_rng(seed)
-MAX_BOOKS = 2000 # MAX_BOOKS < 10001
-MAX_USERS = 10000 # MAX_USERS < 53425
+MAX_BOOKS = 1000 # MAX_BOOKS < 10001
+MAX_USERS = 5000 # MAX_USERS < 53425
 
 """
 데이터 전처리
@@ -125,6 +126,23 @@ def do_Clustering(M, k, mode=0):
     labels = model.fit_predict(book_vectors)
     return labels
 
+#클러스터 시각화(UMAP) 함수
+#mode 0 = user, 1 = item
+def plot_UMAP(M, labels, mode=0):
+    if mode == 1:
+        M = M.T
+    vectors = normalize(M.tocsr(), norm="l2", axis=1)
+    model = umap.UMAP(n_components=2, metric="cosine", n_neighbors=10, min_dist=0.03, random_state=seed)
+    points = model.fit_transform(vectors)
+    plt.figure(figsize=(9, 7))
+    scatter = plt.scatter(points[:, 0], points[:, 1], c=labels, cmap="tab10", s=7, alpha=0.6)
+    plt.colorbar(scatter, ticks=np.unique(labels), label="Cluster")
+    plt.xlabel("UMAP 1")
+    plt.ylabel("UMAP 2")
+    plt.title("User Clustering" if mode == 0 else "Book Clustering")
+    plt.tight_layout()
+    plt.show()
+
 # Cosine similarity 기반 도서 추천
 # mode 0 = user, 1 = item
 def recommend_CF(user_id, M, M_seen, similarity, top_k=5, mode=0):
@@ -235,3 +253,5 @@ for name, func in funcs.items():
 results_df = pd.DataFrame(results).set_index("Method")
 print("\nTest 평가 결과:")
 print(results_df.round(4))
+plot_UMAP(M_liked, labels_item, mode=1)
+plot_UMAP(M_liked, labels_user, mode=0)
