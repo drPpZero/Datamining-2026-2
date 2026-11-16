@@ -10,8 +10,8 @@ import umap
 
 seed = 9875
 rng = np.random.default_rng(seed)
-MAX_BOOKS = 500 # MAX_BOOKS < 10001
-MAX_USERS = 2500 # MAX_USERS < 53425
+MAX_BOOKS = 1000 # MAX_BOOKS < 10001
+MAX_USERS = 5000 # MAX_USERS < 53425
 
 """
 데이터 전처리
@@ -22,7 +22,6 @@ ratings = pd.read_csv("data/ratings.csv")
 books = pd.read_csv("data/books.csv")
 book_tags = pd.read_csv("data/book_tags.csv")
 tags = pd.read_csv("data/tags.csv")
-to_read = pd.read_csv("data/to_read.csv")
 
 ratings = ratings.drop_duplicates(["user_id", "book_id"]).reset_index(drop=True)
 
@@ -39,7 +38,6 @@ n_users = len(user_ids)
 n_books = len(book_ids)
 user_index = {user_id: i for i, user_id in enumerate(user_ids)}
 book_index = {book_id: i for i, book_id in enumerate(book_ids)}
-to_read = to_read[to_read["user_id"].isin(user_ids) & to_read["book_id"].isin(book_ids)].groupby("user_id")["book_id"].agg(set).to_dict()
 
 set_val = []
 set_test = []
@@ -74,9 +72,9 @@ def make_matrix(data, TF=False):
     return M
 
 #Apriori 함수
-def do_apriori(M, min_support=0.02, min_confidence=0.3):
+def do_apriori(M, min_support=0.03, min_confidence=0.3):
     baskets = pd.DataFrame.sparse.from_spmatrix(M, columns=book_ids.astype(str)).astype(pd.SparseDtype(bool, False))
-    frequent = apriori(baskets, min_support=min_support, use_colnames=True, low_memory=True)
+    frequent = apriori(baskets, min_support=min_support, use_colnames=True, low_memory=True, max_len=3)
 
     if frequent.empty or not frequent["itemsets"].apply(len).ge(2).any():
         return frequent, pd.DataFrame()
@@ -140,8 +138,11 @@ def plot_UMAP(M, labels, mode=0):
     model = umap.UMAP(n_components=2, metric="cosine", n_neighbors=15, min_dist=0.1, random_state=seed)
     points = model.fit_transform(vectors)
     plt.figure(figsize=(9, 7))
-    scatter = plt.scatter(points[:, 0], points[:, 1], c=labels, cmap="tab10", s=7, alpha=0.6)
-    plt.colorbar(scatter, ticks=np.unique(labels), label="Cluster")
+    n_clusters = len(np.unique(labels))
+    colors = list(plt.get_cmap("tab20").colors) + list(plt.get_cmap("tab20b").colors) + list(plt.get_cmap("tab20c").colors)
+    cmap = plt.matplotlib.colors.ListedColormap(colors[:n_clusters])
+    scatter = plt.scatter(points[:, 0], points[:, 1], c=labels, cmap=cmap, vmin=-0.5, vmax=n_clusters-0.5, s=12, alpha=0.8)
+    plt.colorbar(scatter, ticks=np.arange(n_clusters), label="Cluster")
     plt.xlabel("UMAP 1")
     plt.ylabel("UMAP 2")
     plt.title("User Clustering" if mode == 0 else "Book Clustering")
@@ -158,6 +159,21 @@ def recommend_CF(user_id, M, M_seen, similarity, top_k=5, mode=0):
         scores = np.asarray(M[u] @ similarity).ravel()
     seen = M_seen[u].indices
     scores[seen] = -np.inf
+    ranked = np.argsort(-scores)
+    ranked = [i for i in ranked if scores[i] > 0][:top_k]
+    return [int(book_ids[i]) for i in ranked]
+
+def recommend_random(user_id, M_seen, top_k=10):
+    u = user_index[user_id]
+    candidates = np.setdiff1d(np.arange(n_books), M_seen[u].indices)
+    rng_user = np.random.default_rng(seed + int(user_id))
+    selected = rng_user.choice(candidates, size=min(top_k, len(candidates)), replace=False)
+    return [int(book_ids[i]) for i in selected]
+
+def recommend_popular(user_id, M_seen, popularity_scores, top_k=10):
+    u = user_index[user_id]
+    scores = popularity_scores.copy()
+    scores[M_seen[u].indices] = -np.inf
     ranked = np.argsort(-scores)
     ranked = [i for i in ranked if scores[i] > 0][:top_k]
     return [int(book_ids[i]) for i in ranked]
@@ -225,7 +241,6 @@ def evaluate(func, data, top_k=10):
     likes = (data[data["rating"] >= 4].groupby("user_id")["book_id"].agg(set))
     recalls = []
     ndcgs = []
-    to_read_hits = []
 
     for user_id, relevant in likes.items():
         recom = func(user_id)[:top_k]
@@ -243,15 +258,10 @@ def evaluate(func, data, top_k=10):
         ndcg = dcg / idcg
         recalls.append(recall)
         ndcgs.append(ndcg)
-        if user_id in to_read:
-            hit = int(bool(set(recom) & to_read[user_id]))
-            to_read_hits.append(hit)
     return {
         "Recall@10": np.mean(recalls),
         "NDCG@10": np.mean(ndcgs),
-        "ToRead_Hit@10": np.mean(to_read_hits) if to_read_hits else np.nan,
-        "Users": len(likes),
-        "ToRead_Users": len(to_read_hits)
+        "Users": len(likes)
     }
 
 
@@ -286,6 +296,11 @@ print(k_results_df.round(4))
 print("최적 User k:", best_k_user)
 print("최적 Item k:", best_k_item)
 
+train_final = pd.concat([train, val], ignore_index=True)
+M_liked = make_matrix(train_final, TF=True)
+M_seen = make_matrix(train_final, TF=False)
+similarity_user = do_CF(M_liked, mode=0)
+similarity_item = do_CF(M_liked, mode=1)
 labels_user = do_Clustering(M_liked, k=best_k_user, mode=0)
 labels_item = do_Clustering(M_liked, k=best_k_item, mode=1)
 cluster_similarity_user = do_Cluster_CF(similarity_user, labels_user)
@@ -295,11 +310,15 @@ print("태그 비교 중...")
 tag_scores = find_genre(labels_item)
 tag_table = make_tag_table(tag_scores, labels_item, top_n=3)
 plot_tag_table(tag_table)
-
+print("연관 규칙 생성 중...")
 frequent, rules = do_apriori(M_liked)
 rule_index = save_rules(rules) if not rules.empty else {}
 
+popularity_scores = np.asarray(M_liked.sum(axis=0)).ravel()
+
 funcs = {
+    "Random Baseline": lambda u: recommend_random(u, M_seen, top_k=10),
+    "Popularity Baseline": lambda u: recommend_popular(u, M_seen, popularity_scores, top_k=10),
     "User-based CF": lambda u: recommend_CF(u, M_liked, M_seen, similarity_user, top_k=10, mode=0),
     "Item-based CF": lambda u: recommend_CF(u, M_liked, M_seen, similarity_item, top_k=10, mode=1),
     "K-means + User CF": lambda u: recommend_CF(u, M_liked, M_seen, cluster_similarity_user, top_k=10, mode=0),
