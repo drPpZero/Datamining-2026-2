@@ -4,7 +4,7 @@
 ## 프로젝트 소개
 Goodbooks-10k 데이터셋을 활용해 적절한 도서를 추천하는 추천 시스템을 구현하였습니다.
 
-Collaborative Filtering, Apriori, K-mean Clustering 알고리즘을 적용하여 추천 시스템을 구현하였습니다.
+Collaborative Filtering, Apriori, K-means Clustering 알고리즘을 적용하여 추천 시스템을 구현하였습니다.
 
 ## Repository 구조
 ```
@@ -53,7 +53,7 @@ python main.py --seed 1111 --books 2222 --users 3333
 
 book cluster 별 tag를 분석한 ```cluster_tags.csv```
  
-k-mean clustering의 k 값 별 validation set 평가를 저장한 ```k_validation.csv```
+k-means clustering의 k 값 별 validation set 평가를 저장한 ```k_validation.csv```
 
 최종 평가 결과를 저장한 ```test_results.csv```
 
